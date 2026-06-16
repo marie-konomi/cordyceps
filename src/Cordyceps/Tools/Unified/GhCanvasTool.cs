@@ -402,40 +402,57 @@ namespace Cordyceps.Tools.Unified
         {
             Core.DebugLog.Info($"gh_canvas add: type='{type}', x={x}, y={y}, nickname='{nickname}'");
 
+            // Phase 1: Create component on a background thread.
+            // EmitObject / proxy.CreateInstance() can trigger lazy assembly initialisation that
+            // dispatches to the Cocoa run loop on Rhino 7 Mac. Running off the UI thread keeps the
+            // run loop free to service those re-entrant callbacks, avoiding the InvokeAndWait deadlock.
+            IGH_DocumentObject component;
+            List<Core.ComponentMatch> matches;
+            try
+            {
+                var createTask = System.Threading.Tasks.Task.Run(() => ComponentRegistry.TryCreateComponent(type));
+                if (!createTask.Wait(System.TimeSpan.FromSeconds(15)))
+                    return ToolHelpers.ErrorResponse($"Component creation timed out for '{type}'. A plugin assembly may still be loading — try again shortly.");
+                (component, matches) = createTask.Result;
+            }
+            catch (AggregateException ex)
+            {
+                return ToolHelpers.ErrorResponse($"Failed to create component: {ex.InnerException?.Message ?? ex.Message}");
+            }
+
+            // Handle disambiguation
+            if (matches != null && matches.Count > 1)
+            {
+                return JsonConvert.SerializeObject(new
+                {
+                    success = false,
+                    error = "ambiguous_name",
+                    message = $"Multiple components match '{type}'. Use GUID or 'Category/Name' format. Prefer non-deprecated components.",
+                    matchCount = matches.Count,
+                    matches = matches.Select(m => new
+                    {
+                        name = m.Name,
+                        guid = m.Guid,
+                        category = m.Category,
+                        subcategory = m.SubCategory,
+                        role = m.Role,
+                        deprecated = m.Deprecated,
+                        upgradeTo = m.UpgradeTo,
+                        upgradeToGuid = m.UpgradeToGuid
+                    })
+                });
+            }
+
+            if (component == null)
+                return ToolHelpers.ErrorResponse($"Unknown component type: {type}");
+
+            // Phase 2: Add to canvas on the UI thread (document mutation requires UI thread).
             return _context.ExecuteOnUiThread(() =>
             {
                 try
                 {
                     if (!ToolHelpers.TryGetActiveDocument(_context, out var doc, out var error))
                         return ToolHelpers.ErrorResponse(error);
-
-                    var (component, matches) = ComponentRegistry.TryCreateComponent(type);
-
-                    // Handle disambiguation
-                    if (matches != null && matches.Count > 1)
-                    {
-                        return JsonConvert.SerializeObject(new
-                        {
-                            success = false,
-                            error = "ambiguous_name",
-                            message = $"Multiple components match '{type}'. Use GUID or 'Category/Name' format. Prefer non-deprecated components.",
-                            matchCount = matches.Count,
-                            matches = matches.Select(m => new
-                            {
-                                name = m.Name,
-                                guid = m.Guid,
-                                category = m.Category,
-                                subcategory = m.SubCategory,
-                                role = m.Role,
-                                deprecated = m.Deprecated,
-                                upgradeTo = m.UpgradeTo,
-                                upgradeToGuid = m.UpgradeToGuid
-                            })
-                        });
-                    }
-
-                    if (component == null)
-                        return ToolHelpers.ErrorResponse($"Unknown component type: {type}");
 
                     if (component.Attributes == null)
                         component.CreateAttributes();
@@ -699,34 +716,46 @@ namespace Cordyceps.Tools.Unified
 
         private string ActionSearch(string query, string category, int limit)
         {
-            return _context.ExecuteOnUiThread(() =>
+            // Run off the UI thread: accessing proxy properties (Desc.Description, Obsolete) can
+            // trigger lazy assembly loading, which on Rhino 7 Mac dispatches back to the Cocoa run
+            // loop. That deadlocks when we're already inside InvokeAndWait. Running on a background
+            // thread keeps the UI thread free to service those re-entrant dispatches.
+            List<Core.ComponentInfo> results;
+            try
             {
-                var results = ComponentRegistry.SearchComponents(query);
+                var task = System.Threading.Tasks.Task.Run(() => ComponentRegistry.SearchComponents(query));
+                if (!task.Wait(System.TimeSpan.FromSeconds(15)))
+                    return ToolHelpers.ErrorResponse("Component search timed out. A plugin assembly may still be loading — try again shortly.");
+                results = task.Result;
+            }
+            catch (AggregateException ex)
+            {
+                return ToolHelpers.ErrorResponse($"Search failed: {ex.InnerException?.Message ?? ex.Message}");
+            }
 
-                if (!string.IsNullOrEmpty(category))
-                    results = results.Where(r => string.Equals(r.Category, category, StringComparison.OrdinalIgnoreCase)).ToList();
+            if (!string.IsNullOrEmpty(category))
+                results = results.Where(r => string.Equals(r.Category, category, StringComparison.OrdinalIgnoreCase)).ToList();
 
-                var enhanced = results.Take(limit > 0 ? limit : 50).Select(r => new
-                {
-                    name = r.Name,
-                    description = r.Description,
-                    category = r.Category,
-                    subcategory = r.SubCategory,
-                    role = ComponentRegistry.GetRole(r.Category, r.SubCategory),
-                    guid = r.Guid,
-                    deprecated = r.Deprecated,
-                    upgradeTo = r.UpgradeTo,
-                    upgradeToGuid = r.UpgradeToGuid
-                }).ToList();
+            var enhanced = results.Take(limit > 0 ? limit : 50).Select(r => new
+            {
+                name = r.Name,
+                description = r.Description,
+                category = r.Category,
+                subcategory = r.SubCategory,
+                role = ComponentRegistry.GetRole(r.Category, r.SubCategory),
+                guid = r.Guid,
+                deprecated = r.Deprecated,
+                upgradeTo = r.UpgradeTo,
+                upgradeToGuid = r.UpgradeToGuid
+            }).ToList();
 
-                return JsonConvert.SerializeObject(new
-                {
-                    success = true,
-                    count = enhanced.Count,
-                    totalMatches = results.Count,
-                    note = "Results are sorted with non-deprecated components first. Prefer components where deprecated=false.",
-                    components = enhanced
-                });
+            return JsonConvert.SerializeObject(new
+            {
+                success = true,
+                count = enhanced.Count,
+                totalMatches = results.Count,
+                note = "Results are sorted with non-deprecated components first. Prefer components where deprecated=false.",
+                components = enhanced
             });
         }
 

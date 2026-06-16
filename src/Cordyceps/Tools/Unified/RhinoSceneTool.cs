@@ -256,7 +256,7 @@ namespace Cordyceps.Tools.Unified
                     if (!string.IsNullOrEmpty(objectName))
                     {
                         var name = obj.Attributes.Name ?? "";
-                        if (!name.Contains(objectName, StringComparison.OrdinalIgnoreCase)) continue;
+                        if (name.IndexOf(objectName, StringComparison.OrdinalIgnoreCase) < 0) continue;
                     }
                     if (selectedOnly && obj.IsSelected(true) == 0) continue;
 

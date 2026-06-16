@@ -17,16 +17,16 @@ namespace Cordyceps.Core
         private const int MAX_COMPONENTS_LIST = 100;
         private const int MAX_SEARCH_RESULTS = 50;
 
-        // Common component name aliases
+        // Common component name aliases (Python entries set in static constructor based on Rhino version)
         private static readonly Dictionary<string, string> NameAliases = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
             // Script components
             { "c#", "C# Script" },
             { "csharp", "C# Script" },
             { "csharp script", "C# Script" },
-            { "python", "Python 3 Script" },
-            { "python script", "Python 3 Script" },
-            { "ghpython", "Python 3 Script" },
+            { "python", "Python 3 Script" },          // overridden for Rhino 7 in static constructor
+            { "python script", "Python 3 Script" },   // overridden for Rhino 7 in static constructor
+            { "ghpython", "Python 3 Script" },        // overridden for Rhino 7 in static constructor
 
             // Planes
             { "plane", "XY Plane" },
@@ -60,13 +60,29 @@ namespace Cordyceps.Core
             { "filter", "Stream Filter" },
         };
 
-        // Known component GUIDs (for common components that might be hard to find by name)
+        // Known component GUIDs (Python entry set in static constructor based on Rhino version)
         private static readonly Dictionary<string, Guid> KnownGuids = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase)
         {
             { "C# Script", new Guid("b6ba1144-02d6-4a2d-b53c-ec62e290eeb7") },
             { "Python 3 Script", new Guid("c9b2d725-6f87-4b07-af90-bd9aefef68eb") },
             { "Stream Filter", new Guid("fb97f83d-9f77-4c6c-b134-1ddfec17e8aa") },
         };
+
+        static ComponentRegistry()
+        {
+            bool isRhino7 = Rhino.RhinoApp.Version.Major < 8;
+            if (isRhino7)
+            {
+                // Rhino 7 uses GhPython (IronPython 2) instead of Python 3 Script
+                const string pythonName = "Python";
+                var pythonGuid = new Guid("410755b1-7622-4181-886a-1c8b9f0aa988");
+
+                NameAliases["python"] = pythonName;
+                NameAliases["python script"] = pythonName;
+                NameAliases["ghpython"] = pythonName;
+                KnownGuids[pythonName] = pythonGuid;
+            }
+        }
 
         /// <summary>
         /// Create a component by type name or GUID
@@ -369,7 +385,7 @@ namespace Cordyceps.Core
                 if (instance is IGH_Component comp)
                 {
                     // Also check if type name contains OBSOLETE
-                    if (!match.Deprecated && instance.GetType().Name.Contains("OBSOLETE", StringComparison.OrdinalIgnoreCase))
+                    if (!match.Deprecated && instance.GetType().Name.IndexOf("OBSOLETE", StringComparison.OrdinalIgnoreCase) >= 0)
                     {
                         match.Deprecated = true;
                     }
