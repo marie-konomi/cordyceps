@@ -13,7 +13,11 @@
 
 ## Requirements
 
-- **Rhino 8.21+** (requires .NET 8)
+| Rhino version | Runtime | Notes |
+|---|---|---|
+| **Rhino 8.21+** | .NET 8 | Full feature support |
+| **Rhino 7** | .NET Framework 4.8 / Mono (macOS) | All tools supported except `rhino_render` environment/lighting actions (see [Limitations](#rhino-7-limitations)) |
+
 - **For AI use**: Claude Desktop, Claude Code, Cursor, VS Code, or any MCP-compatible assistant
 - **For scripting**: Any MCP client library ([Python](https://github.com/modelcontextprotocol/python-sdk), [TypeScript](https://github.com/modelcontextprotocol/typescript-sdk), etc.)
 
@@ -150,11 +154,28 @@ Cordyceps exposes guides and patterns to MCP clients as resources. Your AI assis
 
 Browse the documentation directly: [`src/Cordyceps/Knowledge/`](src/Cordyceps/Knowledge/)
 
+## Rhino 7 Limitations
+
+The following `rhino_render` actions are **not available on Rhino 7** due to API differences:
+
+| Action | Reason |
+|---|---|
+| `ground` | Ground plane API not available in Rhino 7 |
+| `sun` | Sun light API not available in Rhino 7 |
+| `skylight` | Skylight API not available in Rhino 7 |
+| `env_current` | Environment map API not available in Rhino 7 |
+| `env_set` | Environment map API not available in Rhino 7 |
+
+These actions return a clear "requires Rhino 8" error message when called on Rhino 7. All other tools (`gh_canvas`, `gh_wire`, `gh_document`, `gh_script`, `gh_inspect`, `rhino_scene`, and remaining `rhino_render` actions) work on both versions.
+
+On Rhino 7, the Python script component is **GhPython** (IronPython 2) rather than the Python 3 Script component available in Rhino 8. Cordyceps detects the Rhino version at startup and routes the `python` / `ghpython` alias accordingly.
+
 ## Troubleshooting
 
 | Problem | Solution |
 |---------|----------|
-| Plugin won't load | Verify Rhino 8.21+. Unblock the .gha file (Windows) or clear quarantine (macOS). |
+| Plugin won't load on Rhino 8 | Verify Rhino 8.21+. Unblock the .gha file (Windows) or clear quarantine (macOS). |
+| Plugin won't load on Rhino 7 | Verify Rhino 7.x is installed. Unblock the .gha file (Windows) or clear quarantine (macOS). |
 | Can't connect | Ensure Cordyceps component is on canvas. Check the port. |
 | Claude Desktop can't connect | Ensure Node.js is installed. Check Rhino is running with Cordyceps. Restart Claude Desktop after config changes. |
 | Component not found | Use `gh_canvas(action='search', query='...')` to find exact names. |
@@ -162,8 +183,20 @@ Browse the documentation directly: [`src/Cordyceps/Knowledge/`](src/Cordyceps/Kn
 
 ## Building
 
+The project targets both `net8.0` (Rhino 8) and `net48` (Rhino 7). A single build produces `.gha` files for both:
+
 ```bash
-dotnet build src/Cordyceps/Cordyceps.csproj
+dotnet build src/Cordyceps/Cordyceps.csproj -c Release
+```
+
+To build for a specific target only:
+
+```bash
+# Rhino 8 only
+dotnet build src/Cordyceps/Cordyceps.csproj -c Release -f net8.0
+
+# Rhino 7 only
+dotnet build src/Cordyceps/Cordyceps.csproj -c Release -f net48
 ```
 
 ---

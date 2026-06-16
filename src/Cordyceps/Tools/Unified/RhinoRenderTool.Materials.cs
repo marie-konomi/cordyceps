@@ -303,9 +303,11 @@ namespace Cordyceps.Tools.Unified
                         {
                             try
                             {
+#if !NET48
                                 var sim = renderMaterial.ToMaterial(RenderTexture.TextureGeneration.Allow);
                                 if (sim != null)
                                     sim.DiffuseColor = baseColor;
+#endif
                             }
                             catch (Exception ex)
                             {
@@ -538,6 +540,9 @@ namespace Cordyceps.Tools.Unified
 
         private string ActionEnvCurrent()
         {
+#if NET48
+            return ToolHelpers.ErrorResponse("Action 'env_current' requires Rhino 8 or later");
+#else
             return _context.ExecuteOnUiThread(() =>
             {
                 var rhinoDoc = RhinoDoc.ActiveDoc;
@@ -561,10 +566,14 @@ namespace Cordyceps.Tools.Unified
                     reflection = GetEnvInfo(RenderSettings.EnvironmentUsage.Reflection)
                 });
             });
+#endif
         }
 
         private string ActionEnvSet(string environment, string usage)
         {
+#if NET48
+            return ToolHelpers.ErrorResponse("Action 'env_set' requires Rhino 8 or later");
+#else
             return _context.ExecuteOnUiThread(() =>
             {
                 var rhinoDoc = RhinoDoc.ActiveDoc;
@@ -629,6 +638,7 @@ namespace Cordyceps.Tools.Unified
                     modified
                 });
             });
+#endif
         }
 
         private string ActionEnvCreate(string name, string color)

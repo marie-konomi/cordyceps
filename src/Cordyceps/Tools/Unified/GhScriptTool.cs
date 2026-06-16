@@ -69,7 +69,7 @@ namespace Cordyceps.Tools.Unified
             },
             Notes = new[]
             {
-                "Works with C# Script and Python 3 Script components",
+                "Works with C# Script, Python 3 Script (Rhino 8), and GhPython Script (Rhino 7)",
                 "access values: 'item' (default), 'list', 'tree'"
             }
         };
@@ -159,9 +159,15 @@ namespace Cordyceps.Tools.Unified
 
                 try
                 {
-                    dynamic scriptComp = component;
-
-                    scriptComp.SetSource(code);
+                    if (!TrySetScriptSource(component, code))
+                    {
+                        return JsonConvert.SerializeObject(new
+                        {
+                            success = false,
+                            error = "Could not set source code. No known setter (SetSource, Code, Script) found on this component.",
+                            componentType = component.GetType().Name
+                        });
+                    }
 
                     // Surgically sync params instead of SetParametersFromScript(),
                     // which rebuilds all params and destroys cluster input hooks.
@@ -255,15 +261,10 @@ namespace Cordyceps.Tools.Unified
 
                             if (!string.IsNullOrEmpty(code))
                             {
-                                try
-                                {
-                                    scriptComp.SetSource(code);
+                                if (TrySetScriptSource(component, code))
                                     message += ", source set";
-                                }
-                                catch (Exception srcEx)
-                                {
-                                    message += $", source failed: {srcEx.Message}";
-                                }
+                                else
+                                    message += ", source failed: no known setter found";
                             }
 
                             // Re-apply type hints AFTER source is set, because SetSource may reset them
@@ -280,7 +281,7 @@ namespace Cordyceps.Tools.Unified
                     {
                         try
                         {
-                            scriptComp.SetSource(code);
+                            TrySetScriptSource(component, code);
                             try { SyncScriptParams(component, code, out _); } catch { }
                             try { scriptComp.SyncParameters(); } catch { }
 
@@ -670,6 +671,35 @@ namespace Cordyceps.Tools.Unified
             if (typeName.Contains("Script") || typeName.Contains("Python") || typeName.Contains("CSharp"))
                 return true;
             return component.GetType().GetMethod("SetSource") != null;
+        }
+
+        /// <summary>
+        /// Set script source code on any script component, regardless of API differences.
+        /// Rhino 8 script components expose SetSource(). GhPython (Rhino 7) exposes a
+        /// writable Code property instead. Tries all known methods and returns true on success.
+        /// </summary>
+        private bool TrySetScriptSource(IGH_DocumentObject component, string code)
+        {
+            // Rhino 8: Python 3 Script, C# Script
+            var setSourceMethod = component.GetType().GetMethod("SetSource");
+            if (setSourceMethod != null)
+            {
+                try { setSourceMethod.Invoke(component, new object[] { code }); return true; } catch { }
+            }
+
+            // GhPython (Rhino 7): writable Code property
+            var codeProp = component.GetType().GetProperty("Code");
+            if (codeProp != null && codeProp.CanWrite)
+            {
+                try { codeProp.SetValue(component, code); return true; } catch { }
+            }
+
+            // Fallback: dynamic property assignment
+            try { dynamic sc = component; sc.Code = code; return true; } catch { }
+            try { dynamic sc = component; sc.Script = code; return true; } catch { }
+            try { dynamic sc = component; sc.Source = code; return true; } catch { }
+
+            return false;
         }
 
         private string TryGetScriptSource(IGH_DocumentObject component)

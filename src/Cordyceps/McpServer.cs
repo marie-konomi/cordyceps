@@ -6,11 +6,11 @@ using System.Linq;
 using System.Net;
 using System.Reflection;
 using System.Text;
-using System.Text.Json;
-using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
 using Cordyceps.Core;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using Cordyceps.Prompts;
 using Cordyceps.Resources;
 using Rhino;
@@ -359,7 +359,7 @@ namespace Cordyceps
 
             var uptimeSeconds = (int)(DateTime.UtcNow - _startTime).TotalSeconds;
 
-            var health = JsonSerializer.Serialize(new
+            var health = JsonConvert.SerializeObject(new
             {
                 status = "ok",
                 server = "Cordyceps MCP",
@@ -412,15 +412,15 @@ namespace Cordyceps
 
                 Core.DebugLog.WriteLine($"Received: {json.Substring(0, Math.Min(LOG_TRUNCATE_LENGTH, json.Length))}...", "INFO", 1);
 
-                using var doc = JsonDocument.Parse(json);
-                var root = doc.RootElement;
+                var root = JObject.Parse(json);
 
-                var method = root.TryGetProperty("method", out var m) ? m.GetString() : null;
-                var hasId = root.TryGetProperty("id", out var id);
-                var paramsEl = root.TryGetProperty("params", out var p) ? p : default;
+                var method = root["method"]?.Value<string>();
+                var id = root["id"];
+                bool hasId = id != null;
+                var paramsEl = root["params"];
 
                 // JSON-RPC 2.0: Notifications (no id) MUST NOT receive a response
-                bool isNotification = !hasId || id.ValueKind == JsonValueKind.Undefined;
+                bool isNotification = !hasId;
 
                 object result = null;
                 string errorMessage = null;
@@ -452,10 +452,10 @@ namespace Cordyceps
                 var responseObj = new Dictionary<string, object> { ["jsonrpc"] = "2.0" };
 
                 // Add id to response (required for non-notification responses)
-                if (id.ValueKind == JsonValueKind.Number)
-                    responseObj["id"] = id.GetInt32();
-                else if (id.ValueKind == JsonValueKind.String)
-                    responseObj["id"] = id.GetString();
+                if (id?.Type == JTokenType.Integer || id?.Type == JTokenType.Float)
+                    responseObj["id"] = id.Value<int>();
+                else if (id?.Type == JTokenType.String)
+                    responseObj["id"] = id.Value<string>();
 
                 if (errorMessage != null)
                 {
@@ -470,10 +470,9 @@ namespace Cordyceps
                     responseObj["result"] = result;
                 }
 
-                var responseJson = JsonSerializer.Serialize(responseObj, new JsonSerializerOptions
+                var responseJson = JsonConvert.SerializeObject(responseObj, new JsonSerializerSettings
                 {
-                    WriteIndented = false,
-                    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+                    NullValueHandling = NullValueHandling.Ignore
                 });
 
                 Core.DebugLog.WriteLine($"Responding: {responseJson.Substring(0, Math.Min(LOG_TRUNCATE_LENGTH, responseJson.Length))}...", "INFO", 1);
@@ -497,7 +496,7 @@ namespace Cordyceps
         /// <summary>
         /// Dispatch a JSON-RPC method
         /// </summary>
-        private async Task<object> DispatchMethodAsync(string method, JsonElement paramsEl)
+        private async Task<object> DispatchMethodAsync(string method, JToken paramsEl)
         {
             switch (method)
             {
@@ -590,10 +589,10 @@ Resources: gh://docs/getting-started, gh://docs/data-trees, gh://docs/common-err
             return new { tools };
         }
 
-        private async Task<object> HandleToolCallAsync(JsonElement paramsEl)
+        private async Task<object> HandleToolCallAsync(JToken paramsEl)
         {
-            var name = paramsEl.GetProperty("name").GetString();
-            var arguments = paramsEl.TryGetProperty("arguments", out var a) ? a : default;
+            var name = paramsEl?["name"]?.Value<string>();
+            var arguments = paramsEl?["arguments"];
 
             RecordCommand(name);
 
@@ -611,8 +610,7 @@ Resources: gh://docs/getting-started, gh://docs/data-trees, gh://docs/common-err
             for (int i = 0; i < methodParams.Length; i++)
             {
                 var param = methodParams[i];
-                if (arguments.ValueKind == JsonValueKind.Object &&
-                    arguments.TryGetProperty(param.Name, out var argVal))
+                if (arguments is JObject argsObj && argsObj.TryGetValue(param.Name, out var argVal))
                 {
                     args[i] = ConvertJsonValue(argVal, param.ParameterType);
                 }
@@ -658,9 +656,9 @@ Resources: gh://docs/getting-started, gh://docs/data-trees, gh://docs/common-err
         /// <summary>
         /// Handle resources/read request
         /// </summary>
-        private object HandleResourcesRead(JsonElement paramsEl)
+        private object HandleResourcesRead(JToken paramsEl)
         {
-            var uri = paramsEl.TryGetProperty("uri", out var u) ? u.GetString() : null;
+            var uri = paramsEl?["uri"]?.Value<string>();
 
             if (string.IsNullOrEmpty(uri))
             {
@@ -700,9 +698,9 @@ Resources: gh://docs/getting-started, gh://docs/data-trees, gh://docs/common-err
         /// <summary>
         /// Handle prompts/get request
         /// </summary>
-        private object HandlePromptsGet(JsonElement paramsEl)
+        private object HandlePromptsGet(JToken paramsEl)
         {
-            var name = paramsEl.TryGetProperty("name", out var n) ? n.GetString() : null;
+            var name = paramsEl?["name"]?.Value<string>();
 
             if (string.IsNullOrEmpty(name))
             {
@@ -711,11 +709,11 @@ Resources: gh://docs/getting-started, gh://docs/data-trees, gh://docs/common-err
 
             // Extract arguments if provided
             var arguments = new Dictionary<string, string>();
-            if (paramsEl.TryGetProperty("arguments", out var argsEl) && argsEl.ValueKind == JsonValueKind.Object)
+            if (paramsEl?["arguments"] is JObject argsEl)
             {
-                foreach (var prop in argsEl.EnumerateObject())
+                foreach (var prop in argsEl.Properties())
                 {
-                    arguments[prop.Name] = prop.Value.GetString() ?? "";
+                    arguments[prop.Name] = prop.Value.Value<string>() ?? "";
                 }
             }
 
@@ -744,7 +742,7 @@ Resources: gh://docs/getting-started, gh://docs/data-trees, gh://docs/common-err
             };
         }
 
-        private static object ConvertJsonValue(JsonElement element, Type targetType) => Core.JsonTypeConverter.ConvertJsonValue(element, targetType);
+        private static object ConvertJsonValue(JToken element, Type targetType) => Core.JsonTypeConverter.ConvertJsonValue(element, targetType);
 
         /// <summary>
         /// Record that a command was executed

@@ -79,6 +79,9 @@ namespace Cordyceps.Tools.Unified
 
         private string ActionGround(string enabled, double altitude, string autoAltitude, string shadowOnly, string material)
         {
+#if NET48
+            return ToolHelpers.ErrorResponse("Action 'ground' requires Rhino 8 or later");
+#else
             return _context.ExecuteOnUiThread(() =>
             {
                 var rhinoDoc = RhinoDoc.ActiveDoc;
@@ -140,10 +143,14 @@ namespace Cordyceps.Tools.Unified
                     modified
                 });
             });
+#endif
         }
 
         private string ActionSun(string enabled, double azimuth, double altitude, double intensity, double latitude, double longitude, string dateTime)
         {
+#if NET48
+            return ToolHelpers.ErrorResponse("Action 'sun' requires Rhino 8 or later");
+#else
             return _context.ExecuteOnUiThread(() =>
             {
                 var rhinoDoc = RhinoDoc.ActiveDoc;
@@ -232,10 +239,14 @@ namespace Cordyceps.Tools.Unified
                     modified
                 });
             });
+#endif
         }
 
         private string ActionSkylight(string enabled, double shadowIntensity, string customEnvironment)
         {
+#if NET48
+            return ToolHelpers.ErrorResponse("Action 'skylight' requires Rhino 8 or later");
+#else
             return _context.ExecuteOnUiThread(() =>
             {
                 var rhinoDoc = RhinoDoc.ActiveDoc;
@@ -284,6 +295,7 @@ namespace Cordyceps.Tools.Unified
                     modified
                 });
             });
+#endif
         }
 
         #endregion

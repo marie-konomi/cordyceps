@@ -1,6 +1,6 @@
 using System;
-using System.Text.Json;
 using Cordyceps.Core;
+using Newtonsoft.Json.Linq;
 using Xunit;
 
 namespace Cordyceps.Tests;
@@ -28,12 +28,12 @@ public class GetJsonTypeTests
 
 public class ConvertJsonValueTests
 {
-    private static JsonElement Parse(string json)
+    private static JToken Parse(string json)
     {
-        return JsonDocument.Parse(json).RootElement;
+        return JToken.Parse(json);
     }
 
-    // --- Happy path: matching ValueKind ---
+    // --- Happy path: matching token type ---
 
     [Fact]
     public void NumberToInt() =>
